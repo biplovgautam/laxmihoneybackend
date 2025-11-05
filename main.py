@@ -1,9 +1,31 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from app.check import Check
 from app.llmwrapper import GroqLLM
+import os
 
 app = FastAPI()
+
+# Configure CORS - allows frontend to access the API
+origins = [
+    "http://localhost:3000",          # Local development
+    "https://laxmibeekeeping.com.np", # Production frontend
+    "https://www.laxmibeekeeping.com.np", # Production frontend with www
+]
+
+# If you have a specific frontend URL in environment variable
+frontend_url = os.getenv("FRONTEND_URL")
+if frontend_url:
+    origins.append(frontend_url)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Specific origins or ["*"] for all (not recommended for production)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],  # Allows all headers
+)
 
 
 @app.get("/")
