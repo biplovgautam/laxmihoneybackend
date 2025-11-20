@@ -1,9 +1,12 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from app.check import Check
-from app.llmwrapper import GroqLLM
 import os
+
+from importlib import import_module
+from typing import List
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.check import Check
 
 app = FastAPI()
 
@@ -28,6 +31,61 @@ app.add_middleware(
 )
 
 
+SERVICE_CONFIG = [
+    {
+        "name": "laxmihoney",
+        "module": "app.laxmihoneyapp",
+        "router_name": "laxmihoney_router",
+        "prefix": "/api1",
+        "tags": ["laxmihoney"],
+        "enabled": True,
+    },
+    {
+        "name": "mindshipping",
+        "module": "app.mindshippingapp",
+        "router_name": "mindshipping_router",
+        "prefix": "/api2",
+        "tags": ["mindshipping"],
+        "enabled": True,
+    },
+]
+
+
+def _resolve_enabled_services(config: List[dict]) -> List[str]:
+    """Enable/disable services based on ENABLED_SERVICES env var."""
+
+    enabled_env = os.getenv("ENABLED_SERVICES")
+    if not enabled_env:
+        return [service["name"] for service in config if service.get("enabled", True)]
+
+    requested = {service.strip().lower() for service in enabled_env.split(",") if service.strip()}
+    active = []
+    for service in config:
+        if service["name"].lower() in requested:
+            service["enabled"] = True
+            active.append(service["name"])
+        else:
+            service["enabled"] = False
+    return active
+
+
+registered_services: List[str] = []
+active_services = _resolve_enabled_services(SERVICE_CONFIG)
+
+for service in SERVICE_CONFIG:
+    if not service.get("enabled", True):
+        continue
+    try:
+        module = import_module(service["module"])
+        router = getattr(module, service["router_name"])
+        app.include_router(router, prefix=service["prefix"], tags=service["tags"])
+        registered_services.append(service["name"])
+    except Exception as exc:
+        print(
+            f"Warning: Failed to load service '{service['name']}' from {service['module']} - {exc}"
+        )
+
+
 @app.get("/")
 def main():
     return {"message": "Hello, World!"}
@@ -35,56 +93,7 @@ def main():
 @app.get("/health")
 def health_check():
     checker = Check()
-    return {"status": checker.checking()}
-
-# Initialize GroqLLM once at startup
-try:
-    llm = GroqLLM()
-except Exception as e:
-    print(f"Warning: Could not initialize GroqLLM - {e}")
-    llm = None
-
-# Request model for LLM endpoint
-class PromptRequest(BaseModel):
-    prompt: str
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "prompt": "What is FastAPI and why is it popular?"
-            }
-        }
-
-
-@app.post("/llm")
-def test_llm(request: PromptRequest):
-    """
-    Test the GroqLLM functionality by sending a prompt and receiving a response.
-    
-    - **prompt**: Your question or prompt for the LLM
-    """
-    if llm is None:
-        raise HTTPException(
-            status_code=500, 
-            detail="LLM not initialized. Check GROQ_LLM_API in .env file"
-        )
-    
-    if not request.prompt or not request.prompt.strip():
-        raise HTTPException(
-            status_code=400, 
-            detail="Prompt cannot be empty"
-        )
-    
-    try:
-        response = llm._call(request.prompt)
-        return {
-            "prompt": request.prompt,
-            "response": response,
-            "model": llm.model,
-            "status": "success"
-        }
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error generating response: {str(e)}"
-        )
+    return {
+        "status": checker.checking(),
+        "services": registered_services or active_services,
+    }

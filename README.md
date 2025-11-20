@@ -8,10 +8,17 @@ A FastAPI-based backend service for the Laxmi Honey application.
 laxmihoneybackend/
 ├── app/
 │   ├── __init__.py
-│   └── check.py          # Health check module
-├── main.py               # FastAPI application entry point
-├── requirements.txt      # Python dependencies
-├── dockerfile            # Docker configuration
+│   ├── check.py
+│   ├── llmwrapper.py
+│   ├── laxmihoneyapp/
+│   │   ├── __init__.py
+│   │   └── routes.py
+│   └── mindshippingapp/
+│       ├── __init__.py
+│       └── routes.py
+├── main.py
+├── requirements.txt
+├── dockerfile
 ├── .gitignore
 └── README.md
 ```
@@ -80,15 +87,45 @@ Returns a welcome message.
 }
 ```
 
-### GET /health
-Health check endpoint to verify service status.
+### Service Overview
 
-**Response:**
-```json
-{
-  "status": "connected"
-}
+- **`/api1` – Laxmi Honey backend**
+  - `GET /api1/health` – Service-specific health check
+  - `POST /api1/llm` – Proxy to GroqLLM (requires `GROQ_LLM_API` in `.env`)
+- **`/api2` – MindShipping backend**
+  - `GET /api2/health` – Service-specific health check
+  - `GET /api2/info` – Placeholder info endpoint
+
+Both services sit behind the same FastAPI instance (`main.py`). You can extend each folder with additional routers, models, and services as needed, keeping logic isolated per backend.
+
+### Multi-backend routing
+
+Routers are registered dynamically from the `SERVICE_CONFIG` list in `main.py`. Each entry defines:
+
+- `name`: human-friendly identifier used in logs and the `/health` summary
+- `module`: Python import path to the backend package (e.g., `app.laxmihoneyapp`)
+- `router_name`: router object exposed from that package (e.g., `laxmihoney_router`)
+- `prefix`: URL prefix (e.g., `/api1`)
+- `tags`: tags shown in the generated OpenAPI docs
+- `enabled`: default boolean toggle
+
+To temporarily disable/enable a subset of services without editing code, set the `ENABLED_SERVICES` environment variable before starting Uvicorn:
+
+```bash
+export ENABLED_SERVICES=laxmihoney  # loads only /api1
+uvicorn main:app --reload
 ```
+
+This makes each backend folder portable—copy `app/mindshippingapp` into another project, add one entry to `SERVICE_CONFIG`, and it will mount automatically under its prefix.
+
+### Frontend API base URLs
+
+Point the frontend(s) to these base paths so requests reach the intended backend:
+
+- **Laxmi Honey UI:** `https://<your-domain>/api1/*` (e.g., `https://laxmibeekeeping.com.np/api1/llm`)
+- **MindShipping UI:** `https://<your-domain>/api2/*`
+
+When deploying Koyeb or another host, expose a single FastAPI app and route frontend requests to the relevant prefix.
 
 ## API Documentation
 
