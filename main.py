@@ -3,24 +3,29 @@ import os
 from importlib import import_module
 from typing import List
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.check import Check
 
+load_dotenv()
+
 app = FastAPI()
 
-# Configure CORS - allows frontend to access the API
-origins = [
-    "http://localhost:3000",          # Local development
-    "https://laxmibeekeeping.com.np", # Production frontend
-    "https://www.laxmibeekeeping.com.np", # Production frontend with www
+# Configure CORS - allows frontend(s) to access the API
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "https://laxmibeekeeping.com.np",
+    "https://www.laxmibeekeeping.com.np",
+    "https://www.mindshipping.tech",
 ]
 
-# If you have a specific frontend URL in environment variable
-frontend_url = os.getenv("FRONTEND_URL")
-if frontend_url:
-    origins.append(frontend_url)
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS")
+if allowed_origins_env:
+    origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    origins = DEFAULT_ALLOWED_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,

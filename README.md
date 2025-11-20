@@ -98,6 +98,16 @@ Returns a welcome message.
 
 Both services sit behind the same FastAPI instance (`main.py`). You can extend each folder with additional routers, models, and services as needed, keeping logic isolated per backend.
 
+### CORS configuration
+
+Allow only trusted frontends by setting a single environment variable before starting the server:
+
+```
+ALLOWED_ORIGINS="http://localhost:3000,https://laxmibeekeeping.com.np,https://www.laxmibeekeeping.com.np,https://www.mindshipping.tech"
+```
+
+If `ALLOWED_ORIGINS` is undefined, the app falls back to the list shown above (which already includes `https://www.mindshipping.tech`).
+
 ### Multi-backend routing
 
 Routers are registered dynamically from the `SERVICE_CONFIG` list in `main.py`. Each entry defines:
