@@ -1,24 +1,31 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 
 from app.check import Check
 from app.llmwrapper import GroqLLM
 from app.firebase_config import check_firebase_connection, initialize_firebase
+from app.redis_service import RedisChatService
+from app.dependencies import get_current_user_id, get_optional_user_id
 
 router = APIRouter()
 checker = Check()
 
+# Initialize services
 try:
     llm = GroqLLM()
 except Exception as e:
     print(f"Warning: Could not initialize GroqLLM - {e}")
     llm = None
 
-# Initialize Firebase on module load
 try:
     initialize_firebase()
 except Exception as e:
     print(f"Warning: Could not initialize Firebase - {e}")
+
+# Initialize Redis service
+redis_service = RedisChatService()
 
 
 # System prompts for different user types
@@ -53,13 +60,16 @@ As this is a registered user, you can provide more personalized assistance and d
 
 class ChatRequest(BaseModel):
     message: str
+    anonymousId: Optional[str] = Field(None, alias="anonymousId")
 
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "What honey products do you offer?"
+                "message": "What honey products do you offer?",
+                "anonymousId": "anon-12345"
             }
         }
+        populate_by_name = True
 
 
 class PromptRequest(BaseModel):
@@ -110,8 +120,12 @@ def firebase_check():
 @router.post("/llm/public")
 def public_chat(request: ChatRequest):
     """
-    Public chatbot endpoint for non-logged-in users.
-    Uses the public system prompt with basic company information.
+    Public chatbot endpoint for non-logged-in users with multi-turn conversation support.
+    Uses anonymous session ID for temporary conversation history (24 hours).
+    
+    Requires:
+        - Message in request body
+        - anonymousId in request body for session tracking
     """
     if llm is None:
         raise HTTPException(
@@ -121,13 +135,36 @@ def public_chat(request: ChatRequest):
 
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+    
+    # Check for anonymous ID
+    if not request.anonymousId:
+        raise HTTPException(
+            status_code=400,
+            detail="Anonymous ID is required for public chat session."
+        )
 
     try:
-        response = llm._call(request.message, system_prompt=SYSTEM_PROMPT_PUBLIC)
+        # Generate temporary Redis key for anonymous user
+        redis_key = f"chat-anon:{request.anonymousId}:main"
+        
+        # Generate full prompt with chat history
+        full_prompt = redis_service.generate_full_prompt(
+            redis_key,
+            request.message,
+            SYSTEM_PROMPT_PUBLIC
+        )
+        
+        # Call LLM with full context
+        response = llm._call(full_prompt)
+        
+        # Save to chat history (expires in 24 hours)
+        redis_service.save_chat_history(redis_key, request.message, response)
+        
         return {
             "message": request.message,
             "response": response,
             "user_type": "public",
+            "anonymous_id": request.anonymousId,
             "model": llm.model,
             "status": "success",
         }
@@ -138,13 +175,17 @@ def public_chat(request: ChatRequest):
 
 
 @router.post("/llm/authenticated")
-def authenticated_chat(request: ChatRequest):
+def authenticated_chat(
+    request: ChatRequest,
+    user_id: str = Depends(get_current_user_id)
+):
     """
-    Authenticated chatbot endpoint for logged-in users.
-    Uses the authenticated system prompt with personalized assistance capabilities.
+    Authenticated chatbot endpoint for logged-in users with multi-turn conversation support.
+    Uses Firebase Auth for secure user identification and Redis for session memory.
     
-    Note: In a production environment, this should include proper authentication
-    middleware (e.g., JWT token verification) to validate the user's identity.
+    Requires:
+        - Valid Firebase ID token in Authorization header
+        - Message in request body
     """
     if llm is None:
         raise HTTPException(
@@ -156,14 +197,33 @@ def authenticated_chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        response = llm._call(request.message, system_prompt=SYSTEM_PROMPT_AUTHENTICATED)
+        # Generate secure Redis key for authenticated user
+        redis_key = f"chat-auth:{user_id}:main"
+        
+        # Generate full prompt with chat history
+        full_prompt = redis_service.generate_full_prompt(
+            redis_key,
+            request.message,
+            SYSTEM_PROMPT_AUTHENTICATED
+        )
+        
+        # Call LLM with full context
+        response = llm._call(full_prompt)
+        
+        # Save to chat history
+        redis_service.save_chat_history(redis_key, request.message, response)
+        
         return {
             "message": request.message,
             "response": response,
             "user_type": "authenticated",
+            "user_id": user_id,
             "model": llm.model,
             "status": "success",
         }
+    except HTTPException:
+        # Re-raise HTTP exceptions (auth failures)
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Error generating response: {str(e)}"
@@ -197,3 +257,98 @@ def test_llm(request: PromptRequest):
         raise HTTPException(
             status_code=500, detail=f"Error generating response: {str(e)}"
         )
+
+
+@router.get("/llm/history")
+def get_chat_history(
+    token_cred: Optional[HTTPAuthorizationCredentials] = Depends(
+        HTTPBearer(auto_error=False)
+    ),
+    anon_id: Optional[str] = Query(None, alias="anonymousId")
+):
+    """
+    Get chat history for authenticated or anonymous users.
+    
+    For authenticated users: Provide Bearer token in Authorization header
+    For anonymous users: Provide anonymousId as query parameter
+    
+    Returns:
+        Chat history as a list of message objects with 'role' and 'content'
+    """
+    redis_key = None
+    user_type = None
+    
+    # Check for authenticated user first
+    if token_cred and token_cred.credentials:
+        try:
+            from app.firebase_config import verify_firebase_token
+            decoded_token = verify_firebase_token(token_cred.credentials)
+            
+            if decoded_token and "uid" in decoded_token:
+                user_id = decoded_token["uid"]
+                redis_key = f"chat-auth:{user_id}:main"
+                user_type = "authenticated"
+        except Exception as e:
+            print(f"Token verification failed: {e}")
+    
+    # If not authenticated, check for anonymous ID
+    if not redis_key and anon_id:
+        redis_key = f"chat-anon:{anon_id}:main"
+        user_type = "anonymous"
+    
+    # If neither authenticated nor anonymous
+    if not redis_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Either provide authentication token or anonymousId query parameter"
+        )
+    
+    try:
+        history = redis_service.get_history(redis_key)
+        return {
+            "history": history,
+            "user_type": user_type,
+            "message_count": len(history),
+            "status": "success"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving chat history: {str(e)}"
+        )
+
+
+@router.delete("/llm/clearchat")
+def clear_chat_history(user_id: str = Depends(get_current_user_id)):
+    """
+    Clear chat history for authenticated user.
+    Requires valid Firebase authentication token.
+    
+    Returns:
+        Status message indicating success or failure
+    """
+    try:
+        # Construct authenticated Redis key
+        redis_key = f"chat-auth:{user_id}:main"
+        
+        # Delete the chat history
+        deleted_count = redis_service.delete_key(redis_key)
+        
+        if deleted_count > 0:
+            return {
+                "status": "success",
+                "message": "Chat history cleared successfully",
+                "user_id": user_id
+            }
+        else:
+            return {
+                "status": "success",
+                "message": "No chat history found to clear",
+                "user_id": user_id
+            }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error clearing chat history: {str(e)}"
+        )
+
