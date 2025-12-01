@@ -47,13 +47,14 @@ class GroqLLM(LLM):
         """Return identifier for this LLM"""
         return "groq"
     
-    def _call(self, prompt: str, stop: Optional[List[str]] = None) -> str:
+    def _call(self, prompt: str, stop: Optional[List[str]] = None, system_prompt: Optional[str] = None) -> str:
         """
         Call Groq API with error handling
         
         Args:
             prompt: The input prompt/question
             stop: Optional list of stop sequences
+            system_prompt: Optional system prompt to set the context
             
         Returns:
             Generated text response
@@ -64,8 +65,15 @@ class GroqLLM(LLM):
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json"
             }
+            
+            # Build messages array with optional system prompt
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
             data = {
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "model": self.model,
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens

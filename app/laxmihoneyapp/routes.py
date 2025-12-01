@@ -14,6 +14,47 @@ except Exception as e:
     llm = None
 
 
+# System prompts for different user types
+SYSTEM_PROMPT_PUBLIC = """You are a friendly customer service assistant for Laxmi Honey Industry, a premium honey company in Nepal. 
+
+Company Information:
+- We sell 100% pure, natural, and unprocessed honey
+- We work directly with local beekeepers
+- Free delivery on orders above Rs. 1000 across Nepal
+- Standard delivery takes 2-3 business days
+- Contact: +977 981-9492581, info@laxmibeekeeping.com.np
+- CTO & MD: Biplov Gautam - cto@laxmibeekeeping.com.np
+- We offer various types of honey products
+- All products are of highest quality with no additives or preservatives
+
+Provide helpful, friendly, and concise responses (2-3 sentences max). Use emojis appropriately. If the question is about products, delivery, contact info, or honey benefits, provide specific details from the company information above."""
+
+SYSTEM_PROMPT_AUTHENTICATED = """You are a friendly customer service assistant for Laxmi Honey Industry, a premium honey company in Nepal.
+
+Company Information:
+- We sell 100% pure, natural, and unprocessed honey
+- We work directly with local beekeepers
+- Free delivery on orders above Rs. 1000 across Nepal
+- Standard delivery takes 2-3 business days
+- Contact: +977 981-9492581, info@laxmibeekeeping.com.np
+- CTO & MD: Biplov Gautam - cto@laxmibeekeeping.com.np
+- We offer various types of honey products
+- All products are of highest quality with no additives or preservatives
+
+As this is a registered user, you can provide more personalized assistance and detailed information about their orders, preferences, and account. Provide helpful, friendly, and concise responses (2-3 sentences max). Use emojis appropriately."""
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "message": "What honey products do you offer?"
+            }
+        }
+
+
 class PromptRequest(BaseModel):
     prompt: str
 
@@ -30,8 +71,75 @@ def health_check():
     return {"status": checker.checking(), "service": "laxmihoney"}
 
 
+@router.post("/llm/public")
+def public_chat(request: ChatRequest):
+    """
+    Public chatbot endpoint for non-logged-in users.
+    Uses the public system prompt with basic company information.
+    """
+    if llm is None:
+        raise HTTPException(
+            status_code=500,
+            detail="LLM not initialized. Check GROQ_LLM_API in .env file",
+        )
+
+    if not request.message or not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    try:
+        response = llm._call(request.message, system_prompt=SYSTEM_PROMPT_PUBLIC)
+        return {
+            "message": request.message,
+            "response": response,
+            "user_type": "public",
+            "model": llm.model,
+            "status": "success",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error generating response: {str(e)}"
+        )
+
+
+@router.post("/llm/authenticated")
+def authenticated_chat(request: ChatRequest):
+    """
+    Authenticated chatbot endpoint for logged-in users.
+    Uses the authenticated system prompt with personalized assistance capabilities.
+    
+    Note: In a production environment, this should include proper authentication
+    middleware (e.g., JWT token verification) to validate the user's identity.
+    """
+    if llm is None:
+        raise HTTPException(
+            status_code=500,
+            detail="LLM not initialized. Check GROQ_LLM_API in .env file",
+        )
+
+    if not request.message or not request.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    try:
+        response = llm._call(request.message, system_prompt=SYSTEM_PROMPT_AUTHENTICATED)
+        return {
+            "message": request.message,
+            "response": response,
+            "user_type": "authenticated",
+            "model": llm.model,
+            "status": "success",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error generating response: {str(e)}"
+        )
+
+
 @router.post("/llm")
 def test_llm(request: PromptRequest):
+    """
+    Legacy LLM endpoint for backward compatibility and testing.
+    This endpoint accepts raw prompts without system context.
+    """
     if llm is None:
         raise HTTPException(
             status_code=500,

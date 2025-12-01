@@ -95,6 +95,7 @@ Returns a welcome message.
 - **`/api2` – MindShipping backend**
   - `GET /api2/health` – Service-specific health check
   - `GET /api2/info` – Placeholder info endpoint
+  - Auth endpoints live under `/api2/auth/*` (signup & availability helpers)
 
 Both services sit behind the same FastAPI instance (`main.py`). You can extend each folder with additional routers, models, and services as needed, keeping logic isolated per backend.
 

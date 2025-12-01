@@ -5,3 +5,8 @@ langchain-core
 langchain-community
 requests
 python-dotenv
+sqlalchemy
+asyncpg
+passlib[argon2]
+email-validator
+greenlet
