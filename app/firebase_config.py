@@ -227,10 +227,26 @@ def verify_firebase_token(id_token: str) -> Optional[dict]:
     """
     try:
         if _firebase_app is None:
+            print("⚠️ Firebase app not initialized, attempting to initialize...")
             initialize_firebase()
         
+        if _firebase_app is None:
+            print("❌ Firebase app is still None after initialization attempt")
+            return None
+        
+        print(f"🔐 Verifying Firebase token (length: {len(id_token)})...")
         decoded_token = auth.verify_id_token(id_token)
+        print(f"✅ Token verified successfully! UID: {decoded_token.get('uid', 'N/A')}")
         return decoded_token
+    except auth.InvalidIdTokenError as e:
+        print(f"❌ Invalid Firebase ID token: {str(e)}")
+        return None
+    except auth.ExpiredIdTokenError as e:
+        print(f"❌ Expired Firebase ID token: {str(e)}")
+        return None
+    except auth.RevokedIdTokenError as e:
+        print(f"❌ Revoked Firebase ID token: {str(e)}")
+        return None
     except Exception as e:
-        print(f"Error verifying token: {str(e)}")
+        print(f"❌ Error verifying Firebase token: {type(e).__name__} - {str(e)}")
         return None

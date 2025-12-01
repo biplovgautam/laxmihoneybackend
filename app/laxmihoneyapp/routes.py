@@ -278,23 +278,35 @@ def get_chat_history(
     redis_key = None
     user_type = None
     
+    # Debug logging
+    print(f"🔍 /llm/history called:")
+    print(f"   - Has Authorization header: {token_cred is not None and token_cred.credentials is not None}")
+    print(f"   - Has anonymousId: {anon_id is not None}")
+    if token_cred and token_cred.credentials:
+        print(f"   - Token preview: {token_cred.credentials[:20]}...")
+    
     # Check for authenticated user first
     if token_cred and token_cred.credentials:
         try:
             from app.firebase_config import verify_firebase_token
+            print(f"   - Attempting Firebase token verification...")
             decoded_token = verify_firebase_token(token_cred.credentials)
             
             if decoded_token and "uid" in decoded_token:
                 user_id = decoded_token["uid"]
                 redis_key = f"chat-auth:{user_id}:main"
                 user_type = "authenticated"
+                print(f"   ✅ Token verified! User ID: {user_id}")
+            else:
+                print(f"   ❌ Token verification returned invalid data: {decoded_token}")
         except Exception as e:
-            print(f"Token verification failed: {e}")
+            print(f"   ❌ Token verification failed: {e}")
     
     # If not authenticated, check for anonymous ID
     if not redis_key and anon_id:
         redis_key = f"chat-anon:{anon_id}:main"
         user_type = "anonymous"
+        print(f"   ℹ️ Using anonymous session: {anon_id}")
     
     # If neither authenticated nor anonymous
     if not redis_key:
@@ -351,4 +363,21 @@ def clear_chat_history(user_id: str = Depends(get_current_user_id)):
             status_code=500,
             detail=f"Error clearing chat history: {str(e)}"
         )
+
+
+@router.get("/auth/verify")
+def verify_token(user_id: str = Depends(get_current_user_id)):
+    """
+    Debug endpoint to verify Firebase authentication token.
+    Use this to test if your token is valid.
+    
+    Returns:
+        User ID and token validation status
+    """
+    return {
+        "status": "success",
+        "message": "Token is valid",
+        "user_id": user_id,
+        "authenticated": True
+    }
 
