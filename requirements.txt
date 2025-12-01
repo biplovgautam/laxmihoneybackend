@@ -10,3 +10,4 @@ asyncpg
 passlib[argon2]
 email-validator
 greenlet
+firebase-admin

@@ -1,3 +1,8 @@
 .backend
 .env
 .venv
+
+# Firebase credentials
+*firebase-adminsdk*.json
+firebase-credentials/
+serviceAccountKey.json

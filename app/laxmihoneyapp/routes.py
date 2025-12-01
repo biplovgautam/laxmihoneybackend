@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from app.check import Check
 from app.llmwrapper import GroqLLM
+from app.firebase_config import check_firebase_connection, initialize_firebase
 
 router = APIRouter()
 checker = Check()
@@ -12,6 +13,12 @@ try:
 except Exception as e:
     print(f"Warning: Could not initialize GroqLLM - {e}")
     llm = None
+
+# Initialize Firebase on module load
+try:
+    initialize_firebase()
+except Exception as e:
+    print(f"Warning: Could not initialize Firebase - {e}")
 
 
 # System prompts for different user types
@@ -69,6 +76,35 @@ class PromptRequest(BaseModel):
 @router.get("/health")
 def health_check():
     return {"status": checker.checking(), "service": "laxmihoney"}
+
+
+@router.get("/firebase-check")
+def firebase_check():
+    """
+    Check Firebase connection status and configuration.
+    Returns detailed information about Firebase initialization.
+    """
+    result = check_firebase_connection()
+    
+    if result["status"] == "connected":
+        return {
+            "status": "success",
+            "message": "Firebase is connected and operational",
+            "details": result
+        }
+    elif result["status"] == "disconnected":
+        return {
+            "status": "warning",
+            "message": result["message"],
+            "details": result,
+            "hint": "Set FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON in .env file"
+        }
+    else:
+        return {
+            "status": "error",
+            "message": result["message"],
+            "details": result
+        }
 
 
 @router.post("/llm/public")
