@@ -65,8 +65,7 @@ class ChatRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "What honey products do you offer?",
-                "anonymousId": "anon-12345"
+                "message": "What honey products do you offer?"
             }
         }
         populate_by_name = True
@@ -120,12 +119,16 @@ def firebase_check():
 @router.post("/llm/public")
 def public_chat(request: ChatRequest):
     """
-    Public chatbot endpoint for non-logged-in users with multi-turn conversation support.
-    Uses anonymous session ID for temporary conversation history (24 hours).
+    Simple stateless chatbot endpoint for guest/non-logged-in users.
+    No session tracking, no localStorage management - just message in, response out.
+    
+    Frontend should:
+    - Send only the user's message
+    - Display the response
+    - No need to handle anonymousId or tokens
     
     Requires:
-        - Message in request body
-        - anonymousId in request body for session tracking
+        - message: User's question/message
     """
     if llm is None:
         raise HTTPException(
@@ -135,38 +138,14 @@ def public_chat(request: ChatRequest):
 
     if not request.message or not request.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-    
-    # Check for anonymous ID
-    if not request.anonymousId:
-        raise HTTPException(
-            status_code=400,
-            detail="Anonymous ID is required for public chat session."
-        )
 
     try:
-        # Generate temporary Redis key for anonymous user
-        redis_key = f"chat-anon:{request.anonymousId}:main"
-        
-        # Generate full prompt with chat history
-        full_prompt = redis_service.generate_full_prompt(
-            redis_key,
-            request.message,
-            SYSTEM_PROMPT_PUBLIC
-        )
-        
-        # Call LLM with full context
-        response = llm._call(full_prompt)
-        
-        # Save to chat history (expires in 24 hours)
-        redis_service.save_chat_history(redis_key, request.message, response)
+        # Call LLM with system prompt and user message (stateless)
+        response = llm._call(request.message, system_prompt=SYSTEM_PROMPT_PUBLIC)
         
         return {
-            "message": request.message,
             "response": response,
-            "user_type": "public",
-            "anonymous_id": request.anonymousId,
-            "model": llm.model,
-            "status": "success",
+            "status": "success"
         }
     except Exception as e:
         raise HTTPException(
